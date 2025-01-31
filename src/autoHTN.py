@@ -32,14 +32,49 @@ def declare_methods (data):
 
 def make_operator (rule):
 	def operator (state, ID):
-		# your code here
-		pass
+		#1: Check if we have enough time
+		if state.time[ID] < rule['Time']:
+			return False
+		
+		#2: Check the "Requires" field
+		if "Requires" in rule:
+			for req_item, req_amount in rule['Requires'].items():
+				if getattr(state, req_item)[ID] < req_amount:
+					return False
+				
+		#3: Check the "Consumes" field
+		if "Consumes" in rule:
+			for c_item, c_amount in rule['Consumes'].items():
+				if getattr(state, c_item)[ID] < c_amount:
+					return False
+
+		#4: If all checks pass, apply the recipe
+		# Reduce time
+		state.time[ID] -= rule['Time']
+
+		# Consume items
+		if "Consumes" in rule:
+			for c_item, c_amount in rule['Consumes'].items():
+				getattr(state, c_item)[ID] -= c_amount
+
+		# Produce items
+		for p_item, p_amount in rule['Produces'].items():
+			getattr(state, p_item)[ID] += p_amount
+
+		return state
 	return operator
 
 def declare_operators (data):
-	# your code here
-	# hint: call make_operator, then declare the operator to pyhop using pyhop.declare_operators(o1, o2, ..., ok)
-	pass
+	ops = []
+	for recipe_name, rule in data['Recipes'].items():
+		op = make_operator(rule)
+
+		# Give the operator a name
+		op.__name__ = 'op_' + recipe_name
+		ops.append(op)
+
+	pyhop.declare_operators(*ops)
+
 
 def add_heuristic (data, ID):
 	# prune search branch if heuristic() returns True
