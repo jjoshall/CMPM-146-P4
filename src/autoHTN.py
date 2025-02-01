@@ -1,5 +1,6 @@
 import pyhop
 import json
+import time
 
 def check_enough(state, ID, item, num):
 	if getattr(state, item)[ID] >= num: return []
@@ -109,17 +110,39 @@ def declare_operators(data):
 	pyhop.declare_operators(*ops)
 
 def add_heuristic(data, ID):
-	# prune search branch if heuristic() returns True
-	# do not change parameters to heuristic(), but can add more heuristic functions with the same parameters: 
-	# e.g. def heuristic2(...); pyhop.add_check(heuristic2)
+	# Prunes search branches based on a heuristic function.
+	# Track when search starts
+	start_time = time.time()
 	def heuristic(state, curr_task, tasks, plan, depth, calling_stack):
-		# Custom heuristic logic can go here (optional)
+		# Heuristic that prevents infinite regression and optimize search
+		max_depth = 50 # Maximum depth to search
+		time_limit = 30 # Stop searching after 30 seconds
+
+		# 1: Prevent excessive depth
+		if depth > max_depth:
+			return True
+		
+		# 2: Stop if seach takes too long
+		if time.time() - start_time > time_limit:
+			return True
+		
+		# 3: Prune unproductive branches
+		if curr_task[0] == 'produce':
+			item = curr_task[2]
+
+			# If item is already being produced in calling_stack, prevent loops
+			if item in [task[2] for task in calling_stack if task[0] == 'produce']:
+				return True
+			
+			# If item cannot be obtained within a reasonable time, prune
+			if state.time[ID] < 0:
+				return True
 		return False  # Returning True prunes this branch
 
 	pyhop.add_check(heuristic)
 
-def set_up_state(data, ID, time=0):
-    """Initializes Pyhop state based on a JSON problem description."""
+def set_up_state(data, test_data, ID, time=0):
+    # Initializes Pyhop state based on crafting.json and the test case.
     state = pyhop.State('state')
     state.time = {ID: time}
 
@@ -131,52 +154,60 @@ def set_up_state(data, ID, time=0):
         setattr(state, tool, {ID: 0})
 
     # Assign initial values from JSON
-    if 'Initial' in data:
-        for item, num in data['Initial'].items():
-            setattr(state, item, {ID: num})
+    if 'Initial' in test_data:
+        for item, num in test_data['Initial'].items():
+            if hasattr(state, item):  # Ensure it's a valid item/tool
+                getattr(state, item)[ID] = num
+            else:
+                print(f"Warning: '{item}' in test case not found in crafting.json.")
 
     return state
 
-def set_up_goals(data, ID):
+def set_up_goals(test_data, ID):
 	# Creates a list of goals for the planner.
 	goals = []
-	for item, num in data['Goal'].items():
+	for item, num in test_data['Goal'].items():
 		goals.append(('have_enough', ID, item, num))
 
 	return goals
 
 if __name__ == '__main__':
+	test_cases = [
+		{"Initial": {"plank": 1}, "Goal": {"plank": 1}, "Time": 0},   # (a)
+        {"Initial": {}, "Goal": {"plank": 1}, "Time": 300},           # (b)
+        {"Initial": {"plank": 3, "stick": 2}, "Goal": {"wooden_pickaxe": 1}, "Time": 10}, # (c)
+        {"Initial": {}, "Goal": {"iron_pickaxe": 1}, "Time": 100},    # (d)
+        #{"Initial": {}, "Goal": {"cart": 1, "rail": 10}, "Time": 175},# (e)
+        #{"Initial": {}, "Goal": {"cart": 1, "rail": 20}, "Time": 250} # (f)
+	]
+
 	rules_filename = 'crafting.json'
 
 	with open(rules_filename) as f:
 		data = json.load(f)
 
-	# If there are multiple problems in the JSON, iterate over them
-	if "Problems" in data:
-		for i, problem in enumerate(data["Problems"]):
-			print(f"\n*** Solving Problem {i + 1} ***\n")
-			state = set_up_state(problem, 'agent', time=problem.get('Time', 239))
-			goals = set_up_goals(problem, 'agent')
+	# Declare operators and methods
+	declare_operators(data)
+	declare_methods(data)
 
-			declare_operators(data)
-			declare_methods(data)
-			add_heuristic(data, 'agent')
+	for i, test in enumerate(test_cases):
+		print(f"Test Case {chr(97 + i)}:")
 
-			print(f"Initial State: {state.__dict__}")
-			print(f"Goals: {goals}\n")
+		# Set up initial state and goals
+		state = set_up_state(data, test, 'agent', time=test['Time'])
+		goals = set_up_goals(test, 'agent')
 
-			# Solve the problem
-			pyhop.pyhop(state, goals, verbose=1)
-	else:
-		state = set_up_state(data, 'agent', time=data.get('Time', 239))
-		goals = set_up_goals(data, 'agent')
-
-		declare_operators(data)
-		declare_methods(data)
+		# Add heuristic to prune search branches
 		add_heuristic(data, 'agent')
 
 		print(f"Initial State: {state.__dict__}")
 		print(f"Goals: {goals}\n")
 
-		# Solve the problem
-		pyhop.pyhop(state, goals, verbose=1)
+		# Run the planner
+		solution = pyhop.pyhop(state, goals, verbose=3)
+
+		# Print the solution
+		if solution is not False:
+			print(f"Test Case {chr(97 + i)} Solved\n")
+		else:
+			print(f"Test Case {chr(97 + i)} Failed\n")
