@@ -17,18 +17,51 @@ pyhop.declare_methods ('produce', produce)
 
 def make_method (name, rule):
 	def method (state, ID):
-		# your code here
-		pass
+		subtasks = []
+
+		#1: For everything in "Requires", check if we have required tools
+		if "Requires" in rule:
+			for req_item, req_amt in rule["Requires"].items():
+				if getattr(state, req_item)[ID] < req_amt:
+					subtasks.append(('have_enough', ID, req_item, req_amt))
+
+		#2: For everything in "Consumes", check if we have enough ingredients
+		if "Consumes" in rule:
+			for c_item, c_amt in rule["Consumes"].items():
+				subtasks.append(('have_enough', ID, c_item, c_amt))
+
+		#3 Apply the subtasks
+		subtasks.append(('op_' + name, ID))
+
+		return subtasks
 
 	return method
 
 def declare_methods (data):
 	# some recipes are faster than others for the same product even though they might require extra tools
 	# sort the recipes so that faster recipes go first
+	methods = {}
 
-	# your code here
-	# hint: call make_method, then declare the method to pyhop using pyhop.declare_methods('foo', m1, m2, ..., mk)	
-	pass			
+	# Get recipes and sort them by time (shortest first)
+	sorted_recipes = sorted(data['Recipes'].items(), key=lambda r: r[1]['Time'])			
+
+	# Iterate over the sorted recipes and create methods for each
+	for recipe_name, rule in sorted_recipes:
+		produced_items = rule['Produces']
+
+		for item in produced_items:
+			# Create a method for each recipe
+			new_method = make_method(recipe_name, rule)
+
+			# Add to list of methods for the item
+			if item in methods:
+				methods[item].append(new_method)
+			else:
+				methods[item] = [new_method]
+	
+	# Declare the methods
+	for item, method_list in methods.items():
+		pyhop.declare_methods(f'produce_{item}', *method_list)
 
 def make_operator (rule):
 	def operator (state, ID):
